@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CosmicZoom - Universal Image Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/openseadragon.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #0a0a2a;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+        #header {
+            background: #1a1a4a;
+            padding: 20px;
+            text-align: center;
+            border-bottom: 2px solid #4a4a8a;
+        }
+        #url-input-section {
+            background: #2a2a5a;
+            padding: 20px;
+            text-align: center;
+        }
+        #url-form {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        #image-url {
+            width: 70%;
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            background: #1a1a3a;
+            color: white;
+            border: 1px solid #4a4a8a;
+        }
+        #load-btn {
+            padding: 10px 20px;
+            background: #00aaff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+        #load-btn:hover {
+            background: #0088cc;
+        }
+        #viewer-container {
+            display: none;
+            position: relative;
+        }
+        #viewer {
+            width: 100vw;
+            height: 80vh;
+        }
+        #controls {
+            position: absolute;
+            top: 100px;
+            left: 20px;
+            background: rgba(0,0,0,0.9);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 1000;
+            min-width: 200px;
+        }
+        #annotation-panel {
+            position: absolute;
+            top: 100px;
+            right: 20px;
+            background: rgba(0,0,0,0.9);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 1000;
+            min-width: 250px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        button {
+            background: #4a4a8a;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: block;
+            width: 100%;
+        }
+        button:hover {
+            background: #6a6aaa;
+        }
+        .annotation-marker {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: #ff4444;
+            border: 2px solid white;
+            border-radius: 50%;
+            cursor: pointer;
+            z-index: 500;
+        }
+        .annotation-item {
+            background: #2a2a5a;
+            margin: 5px 0;
+            padding: 8px;
+            border-radius: 4px;
+            border-left: 3px solid #00aaff;
+        }
+        .success { color: #00ff00; }
+        .error { color: #ff4444; }
+        .loading { color: #ffff00; }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1> CosmicZoom - Universal NASA Image Viewer</h1>
+        <p>Paste any image URL to explore it with zoom and annotations</p>
+    </div>
+
+    <div id="url-input-section">
+        <form id="url-form">
+            <input type="url" id="image-url" placeholder="Paste image URL here (e.g., https://example.com/image.jpg)" required>
+            <button type="submit" id="load-btn">Load Image</button>
+        </form>
+        <div id="url-status" style="margin-top: 10px;"></div>
+        
+        <div style="margin-top: 20px;">
+            <h3>Try these NASA image URLs:</h3>
+            <button onclick="loadExample('https://cdn.esahubble.org/archives/images/screen/heic1502a.jpg')">Hubble Andromeda</button>
+            <button onclick="loadExample('https://www.nasa.gov/sites/default/files/thumbnails/image/pia24546.jpg')">Mars Perseverance</button>
+            <button onclick="loadExample('https://www.nasa.gov/sites/default/files/thumbnails/image/iss067e088375.jpg')">Earth from ISS</button>
+        </div>
+    </div>
+
+    <div id="viewer-container">
+        <div id="controls">
+            <h3>Navigation</h3>
+            <button onclick="viewer.viewport.goHome()"> Reset View</button>
+            <button onclick="viewer.viewport.zoomBy(1.5)"> Zoom In</button>
+            <button onclick="viewer.viewport.zoomBy(0.5)"> Zoom Out</button>
+            <button onclick="takeScreenshot()">Screenshot</button>
+            
+            <h3>Annotations</h3>
+            <button id="annotation-mode-btn" onclick="toggleAnnotationMode()">Enable Annotations</button>
+            <button onclick="clearAllAnnotations()">Clear All</button>
+            <button onclick="exportAnnotations()">Export JSON</button>
+        </div>
+
+        <div id="annotation-panel">
+            <h3>Annotations</h3>
+            <div id="annotations-list"></div>
+            <div id="no-annotations" style="color: #888; font-style: italic;">No annotations yet. Click on the image to add one!</div>
+        </div>
+
+        <div id="viewer-status" style="padding: 10px; text-align: center; background: #1a1a4a;">
+            <span class="success">Ready to explore!</span>
+        </div>
+
+        <div id="viewer"></div>
+    </div>
+
+    <script>
+        // Global variables
+        let viewer;
+        let annotations = [];
+        let annotationMode = false;
+        let currentImageUrl = '';
+
+        // Initialize OpenSeadragon when image is loaded
+        function initializeViewer(imageUrl) {
+            currentImageUrl = imageUrl;
+            
+            // Show viewer container
+            document.getElementById('viewer-container').style.display = 'block';
+            document.getElementById('viewer-status').innerHTML = '<span class="loading">Loading image...</span>';
+            
+            // Scroll to viewer
+            document.getElementById('viewer-container').scrollIntoView({ behavior: 'smooth' });
+            
+            // Clear previous viewer if exists
+            if (viewer) {
+                viewer.destroy();
+            }
+            
+            // Clear previous annotations
+            annotations = [];
+            updateAnnotationsDisplay();
+            document.querySelectorAll('.annotation-marker').forEach(marker => marker.remove());
+            
+            // Initialize OpenSeadragon
+            viewer = OpenSeadragon({
+                id: "viewer",
+                prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/images/",
+                tileSources: {
+                    type: 'image',
+                    url: imageUrl
+                },
+                showNavigator: true,
+                navigatorPosition: "BOTTOM_RIGHT",
+                showRotationControl: true,
+                gestureSettingsMouse: {
+                    scrollToZoom: true
+                },
+                zoomPerScroll: 1.2,
+                minZoomLevel: 0.1,
+                maxZoomLevel: 5
+            });
+
+            // Set up event handlers
+            viewer.addHandler('open', function() {
+                document.getElementById('viewer-status').innerHTML = 
+                    '<span class="success">Image loaded! Use mouse wheel to zoom, click and drag to pan.</span>';
+                loadAnnotations();
+            });
+
+            viewer.addHandler('canvas-click', function(event) {
+                if (!annotationMode) return;
+                
+                const webPoint = event.position;
+                const viewportPoint = viewer.viewport.pointFromPixel(webPoint);
+                
+                const annotationText = prompt('Enter your annotation for this location:');
+                if (annotationText && annotationText.trim() !== '') {
+                    addAnnotation(viewportPoint.x, viewportPoint.y, annotationText);
+                }
+            });
+
+            // Reset annotation mode
+            annotationMode = false;
+            document.getElementById('annotation-mode-btn').innerHTML = 'Enable Annotations';
+            document.getElementById('annotation-mode-btn').classList.remove('active');
+        }
+
+        // URL form handler
+        document.getElementById('url-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const imageUrl = document.getElementById('image-url').value.trim();
+            
+            if (!imageUrl) {
+                document.getElementById('url-status').innerHTML = '<span class="error">Please enter an image URL</span>';
+                return;
+            }
+            
+            document.getElementById('url-status').innerHTML = '<span class="loading">Loading image from URL...</span>';
+            
+            // Test if image is accessible
+            const img = new Image();
+            img.onload = function() {
+                document.getElementById('url-status').innerHTML = '<span class="success">Image accessible! Initializing viewer...</span>';
+                initializeViewer(imageUrl);
+            };
+            img.onerror = function() {
+                document.getElementById('url-status').innerHTML = '<span class="error">Cannot load image from URL. Check the URL and CORS permissions.</span>';
+            };
+            img.src = imageUrl;
+        });
+
+        // Load example URLs
+        function loadExample(url) {
+            document.getElementById('image-url').value = url;
+            document.getElementById('url-form').dispatchEvent(new Event('submit'));
+        }
+
+        // Annotation functions (same as before)
+        function toggleAnnotationMode() {
+            annotationMode = !annotationMode;
+            const btn = document.getElementById('annotation-mode-btn');
+            
+            if (annotationMode) {
+                btn.innerHTML = 'Annotations Enabled';
+                btn.classList.add('active');
+                viewer.gestureSettingsMouse.clickToZoom = false;
+                document.getElementById('viewer-status').innerHTML = 
+                    '<span class="success">Annotation mode enabled! Click anywhere on the image to add annotations.</span>';
+            } else {
+                btn.innerHTML = 'Enable Annotations';
+                btn.classList.remove('active');
+                viewer.gestureSettingsMouse.clickToZoom = true;
+                document.getElementById('viewer-status').innerHTML = 
+                    '<span class="success">Annotation mode disabled. Normal navigation enabled.</span>';
+            }
+        }
+
+        function addAnnotation(x, y, text) {
+            const annotation = {
+                id: Date.now() + Math.random(),
+                x: x,
+                y: y,
+                text: text,
+                timestamp: new Date().toISOString(),
+                zoom: viewer.viewport.getZoom(),
+                imageUrl: currentImageUrl
+            };
+            
+            annotations.push(annotation);
+            saveAnnotations();
+            updateAnnotationsDisplay();
+            createAnnotationMarker(annotation);
+        }
+
+        function createAnnotationMarker(annotation) {
+            const screenPoint = viewer.viewport.pixelFromPoint(new OpenSeadragon.Point(annotation.x, annotation.y));
+            
+            const marker = document.createElement('div');
+            marker.className = 'annotation-marker';
+            marker.style.left = (screenPoint.x - 10) + 'px';
+            marker.style.top = (screenPoint.y - 10) + 'px';
+            marker.title = annotation.text;
+            
+            marker.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (confirm('Annotation: "' + annotation.text + '"\n\nDelete this annotation?')) {
+                    deleteAnnotation(annotation.id);
+                }
+            });
+            
+            document.getElementById('viewer').appendChild(marker);
+            
+            viewer.addHandler('animation', function() {
+                const newScreenPoint = viewer.viewport.pixelFromPoint(new OpenSeadragon.Point(annotation.x, annotation.y));
+                marker.style.left = (newScreenPoint.x - 10) + 'px';
+                marker.style.top = (newScreenPoint.y - 10) + 'px';
+            });
+        }
+
+        function deleteAnnotation(id) {
+            annotations = annotations.filter(ann => ann.id !== id);
+            saveAnnotations();
+            updateAnnotationsDisplay();
+            document.querySelectorAll('.annotation-marker').forEach(marker => marker.remove());
+            annotations.forEach(createAnnotationMarker);
+        }
+
+        function clearAllAnnotations() {
+            if (confirm('Are you sure you want to delete ALL annotations?')) {
+                annotations = [];
+                saveAnnotations();
+                updateAnnotationsDisplay();
+                document.querySelectorAll('.annotation-marker').forEach(marker => marker.remove());
+            }
+        }
+
+        function updateAnnotationsDisplay() {
+            const list = document.getElementById('annotations-list');
+            const noAnnotations = document.getElementById('no-annotations');
+            
+            list.innerHTML = '';
+            
+            if (annotations.length === 0) {
+                noAnnotations.style.display = 'block';
+                return;
+            }
+            
+            noAnnotations.style.display = 'none';
+            
+            annotations.forEach(annotation => {
+                const item = document.createElement('div');
+                item.className = 'annotation-item';
+                item.innerHTML = `
+                    <div style="font-size: 12px; margin: 5px 0;">${annotation.text}</div>
+                    <div style="font-size: 10px; color: #888;">Location: ${annotation.x.toFixed(3)}, ${annotation.y.toFixed(3)}</div>
+                    <button onclick="deleteAnnotation(${annotation.id})" style="background: #ff4444; padding: 3px 8px; font-size: 10px; width: auto; margin: 2px;">Delete</button>
+                    <button onclick="goToAnnotation(${annotation.id})" style="background: #00aa00; padding: 3px 8px; font-size: 10px; width: auto; margin: 2px;">View</button>
+                `;
+                list.appendChild(item);
+            });
+        }
+
+        function goToAnnotation(id) {
+            const annotation = annotations.find(ann => ann.id === id);
+            if (annotation) {
+                viewer.viewport.panTo(new OpenSeadragon.Point(annotation.x, annotation.y));
+                viewer.viewport.zoomTo(annotation.zoom || 1);
+            }
+        }
+
+        function saveAnnotations() {
+            const data = {
+                imageUrl: currentImageUrl,
+                annotations: annotations
+            };
+            localStorage.setItem('cosmiczoom_current_annotations', JSON.stringify(data));
+        }
+
+        function loadAnnotations() {
+            const saved = localStorage.getItem('cosmiczoom_current_annotations');
+            if (saved) {
+                const data = JSON.parse(saved);
+                if (data.imageUrl === currentImageUrl) {
+                    annotations = data.annotations || [];
+                    updateAnnotationsDisplay();
+                    annotations.forEach(createAnnotationMarker);
+                }
+            }
+        }
+
+        function exportAnnotations() {
+            const data = {
+                imageUrl: currentImageUrl,
+                annotations: annotations,
+                exportDate: new Date().toISOString()
+            };
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `cosmiczoom_annotations_${Date.now()}.json`);
+            downloadAnchor.click();
+        }
+
+        function takeScreenshot() {
+            const canvas = viewer.drawer.canvas;
+            const link = document.createElement('a');
+            link.download = `cosmiczoom_screenshot_${Date.now()}.png`;
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            if (!viewer) return;
+            switch(e.key) {
+                case 'a': toggleAnnotationMode(); break;
+                case '+': viewer.viewport.zoomBy(1.5); break;
+                case '-': viewer.viewport.zoomBy(0.5); break;
+                case '0': viewer.viewport.goHome(); break;
+            }
+        });
+    </script>
+</body>
+</html>
