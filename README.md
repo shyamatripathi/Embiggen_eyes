@@ -61,8 +61,7 @@ A	Toggle annotation mode
 Space	Go to home position
 
 Project Structure
-bash
-Copy code
+
 ├── cosmiczoom_with_annotations.html   # Main application
 ├── create_tiles.py                    # Image processing script
 ├── andromeda_local.jpg                # Sample space image
